@@ -1,4 +1,5 @@
 let m = import "../modules/void-iso.ncl" in
 m & {
-  output = "void-live-animesh-%{m.arch}-%{m.variant}.iso",
+  packages = ["nickel", "git", "curl", "ca-certificates", "xz"],
+  services = ["docker"],
 }
