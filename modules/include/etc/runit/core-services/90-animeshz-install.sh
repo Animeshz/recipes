@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eu
+set -euo pipefail
 
 cmdline=$(cat /proc/cmdline 2>/dev/null || true)
 
@@ -51,4 +51,3 @@ fi
 
 logger -t animeshz-install "running recipe '$install_recipe' from $recipes_repo@$recipes_ref"
 exec sh -c "$install_plan"
-
