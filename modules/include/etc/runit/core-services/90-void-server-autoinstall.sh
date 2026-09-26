@@ -1,28 +1,20 @@
 #!/bin/sh
 set -euo pipefail
 
-cmdline=$(cat /proc/cmdline 2>/dev/null || true)
+trigger_seen=0
 
-install_arg=animesh.install=
-repo_arg=animesh.recipes=
-ref_arg=animesh.recipes-ref=
-
-install_recipe=
-recipes_repo=https://github.com/Animeshz/recipes.git
-recipes_ref=main
-
-for tok in $cmdline; do
+for tok in $(cat /proc/cmdline 2>/dev/null || true); do
   case "$tok" in
-    "$install_arg"*) install_recipe=${tok#"$install_arg"} ;;
-    "$repo_arg"*)    recipes_repo=${tok#"$repo_arg"} ;;
-    "$ref_arg"*)     recipes_ref=${tok#"$ref_arg"} ;;
+    void_server_autoinstall=1) trigger_seen=1 ;;
   esac
 done
 
-if [ -z "$install_recipe" ] || [ "$install_recipe" = "0" ] || [ "$install_recipe" = "no" ]; then
+if [ "$trigger_seen" -ne 1 ]; then
   exit 0
 fi
 
+recipes_repo=https://github.com/Animeshz/recipes.git
+recipes_ref=main
 recipes_root=/run/animeshz-recipes
 mkdir -p "$recipes_root"
 
@@ -33,11 +25,11 @@ else
   git -C "$recipes_root" checkout --detach FETCH_HEAD
 fi
 
-recipe_file="$recipes_root/recipes/$install_recipe.ncl"
-module_file="$recipes_root/modules/$install_recipe.ncl"
+recipe_file="$recipes_root/recipes/void-server-install.ncl"
+module_file="$recipes_root/modules/void-server-install.ncl"
 
 if [ ! -f "$recipe_file" ] || [ ! -f "$module_file" ]; then
-  logger -t animeshz-install "recipe '$install_recipe' not found in $recipes_repo@$recipes_ref"
+  logger -t void-server-autoinstall "recipe 'void-server-install' not found in $recipes_repo@$recipes_ref"
   exit 0
 fi
 
@@ -45,9 +37,9 @@ nickel_export=$(nickel export --format=json "$recipe_file")
 install_plan=$(printf '%s' "$nickel_export" | jq -r .plan)
 
 if [ -z "$install_plan" ] || [ "$install_plan" = "null" ]; then
-  logger -t animeshz-install "recipe '$install_recipe' produced no plan"
+  logger -t void-server-autoinstall "recipe 'void-server-install' produced no plan"
   exit 0
 fi
 
-logger -t animeshz-install "running recipe '$install_recipe' from $recipes_repo@$recipes_ref"
+logger -t void-server-autoinstall "running recipe 'void-server-install' from $recipes_repo@$recipes_ref"
 exec sh -c "$install_plan"
