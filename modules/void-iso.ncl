@@ -12,7 +12,7 @@
     enable | default = false,
     qemu | default = "qemu-system-x86_64",
     ssh_port | default = "2222",
-    vm_ram | default = "2048",
+    vm_ram | default = "4096",
     vm_cpus | default = "8",
     seed_iso | default = "https://repo-default.voidlinux.org/live/current/void-live-x86_64-20250202-base.iso",
     user | default = "anon",
@@ -62,6 +62,8 @@
       abs_include="$PWD/%%{include_dir}"
       abs_output="$PWD/%%{output}"
       mkdir -p "$(dirname "$abs_output")"
+      export XBPS_CACHEDIR="$PWD/%%{workdir}/xbps-cachedir"
+      export XBPS_HOST_CACHEDIR="$XBPS_CACHEDIR"
 
       mklive_args=(
         -p "%%{pkg_list}"
@@ -90,7 +92,11 @@
     elapsed() { echo "$(( $(date +%s) - started_at ))"; }
 
     workdir="%%{workdir}"
-    mkdir -p "$workdir"
+    mkdir -p "$workdir" "$workdir/xbps-cachedir"
+    build_disk="$workdir/build-disk.qcow2"
+    if [ ! -f "$build_disk" ]; then
+      qemu-img create -f qcow2 "$build_disk" 20G
+    fi
     askpass=$(mktemp "${TMPDIR:-/tmp}/void-iso-askpass.XXXXXX")
     {
       printf '%s\n' '#!/bin/sh'
@@ -106,6 +112,7 @@
       -o UserKnownHostsFile=/dev/null
       -o PreferredAuthentications=password
       -o PubkeyAuthentication=no
+      -o LogLevel=ERROR
     )
 
     echo "void-iso: preparing seed (elapsed $(elapsed)s)..."
@@ -148,6 +155,7 @@
       -m "$vm_ram" -smp "$vm_cpus"
       -virtfs "local,path=$PWD,mount_tag=recipes,security_model=mapped-xattr,multidevs=remap"
       -drive "file=$seed,media=cdrom,readonly=on"
+      -drive "file=$build_disk,if=virtio,format=qcow2"
       -netdev "user,id=net0,hostfwd=tcp::${ssh_port}-:22"
       -device virtio-net-pci,netdev=net0
       -serial "unix:$ssh_sock,server=on,wait=off"
@@ -189,13 +197,17 @@
     ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" \
       "sudo mkdir -p /mnt/recipes; if ! sudo mountpoint -q /mnt/recipes; then sudo mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600 recipes /mnt/recipes; fi; sudo touch /mnt/recipes/$workdir/.write-test && sudo rm -f /mnt/recipes/$workdir/.write-test"
 
+    echo "void-iso: preparing build disk (elapsed $(elapsed)s)..."
+    ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" \
+      "if [ -z \"\$(sudo blkid /dev/vda 2>/dev/null)\" ]; then sudo mkfs.ext4 -F /dev/vda; fi; sudo mkdir -p /build; if ! sudo mountpoint -q /build; then sudo mount /dev/vda /build; fi; sudo touch /build/.write-test && sudo rm -f /build/.write-test"
+
     echo "void-iso: installing guest prerequisites (elapsed $(elapsed)s)..."
     ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" \
-      "sudo xbps-install -Syu xbps && sudo xbps-install -Sy %%{guest_pkg_list} && sudo usermod -aG docker $guest_user"
+      "sudo mkdir -p /etc/xbps.d && printf '%s\\n' 'cachedir=/mnt/recipes/$workdir/xbps-cachedir' | sudo tee /etc/xbps.d/10-cache.conf >/dev/null && sudo xbps-install -Syu xbps && sudo xbps-install -Sy %%{guest_pkg_list} && sudo usermod -aG docker $guest_user"
 
     echo "void-iso: starting docker in guest (elapsed $(elapsed)s)..."
     ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" \
-      "sudo ln -sf /etc/sv/docker /var/service/docker && docker_wait_started=\$(date +%s) && while [ ! -S /var/run/docker.sock ]; do if [ \"\$(( \$(date +%s) - docker_wait_started ))\" -ge 60 ]; then echo >&2 'void-iso: docker socket did not appear'; sudo sv status docker >&2 2>&1 || true; exit 1; fi; sleep 1; done"
+      "sudo mkdir -p /etc/docker && printf '%s\\n' '{\"storage-driver\": \"vfs\"}' | sudo tee /etc/docker/daemon.json >/dev/null && sudo ln -sf /etc/sv/docker /var/service/docker && docker_wait_started=\$(date +%s) && while [ ! -S /var/run/docker.sock ]; do if [ \"\$(( \$(date +%s) - docker_wait_started ))\" -ge 60 ]; then echo >&2 'void-iso: docker socket did not appear'; sudo sv status docker >&2 2>&1 || true; exit 1; fi; sleep 1; done"
 
     echo "void-iso: fetching nickel image (elapsed $(elapsed)s)..."
     ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" \
@@ -203,7 +215,7 @@
 
     echo "void-iso: running build (elapsed $(elapsed)s)..."
     ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" \
-      "cd /mnt/recipes && sudo make void-iso"
+      "cd /mnt/recipes && sudo env ROOTDIR=/build make void-iso"
 
     echo "void-iso: verifying ISO (elapsed $(elapsed)s)..."
     if [ ! -f "$output" ]; then
