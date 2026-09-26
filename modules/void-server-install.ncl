@@ -82,19 +82,14 @@
     mkfs.vfat -F32 "$esp_path"
     mount "$esp_path" /mnt/boot/efi
 
-    mkdir -p /mnt/var/db/xbps/keys
-    cp /var/db/xbps/keys/* /mnt/var/db/xbps/keys/
+    tar --create --one-file-system --xattrs -f - / 2>/dev/null | \
+      tar --extract --xattrs --xattrs-include='*' --preserve-permissions -f - -C /mnt
+
+    mkdir -p /mnt/proc /mnt/sys /mnt/dev /mnt/run /mnt/tmp
+    mkdir -p /mnt/dev/pts /mnt/dev/shm
+    chmod 1777 /mnt/tmp
+
     cp /etc/hostid /mnt/etc/
-
-    XBPS_ARCH=x86_64 xbps-install \
-      -S \
-      -R %%{release} \
-      -r /mnt \
-      base-system \
-      %%{std.string.join " " packages}
-
-    xbps-install -S -r /mnt zfs
-    xbps-install -S -r /mnt efibootmgr
 
     cat > /mnt/etc/dracut.conf.d/zol.conf <<'EOF'
     nofsck="yes"
