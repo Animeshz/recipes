@@ -70,7 +70,6 @@
         -S "%%{svc_list}"
         -I "$abs_include"
         -o "$abs_output"
-        -K
       )
 
       if [ "${#kernel_args[@]}" -gt 0 ] && [ -n "${kernel_args[0]}" ]; then
@@ -171,7 +170,7 @@
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
       fi
-      rm -f "$ssh_sock" "$askpass"
+      rm -f "$ssh_sock" "$askpass" "$build_disk"
     }
     trap cleanup EXIT INT TERM
 
