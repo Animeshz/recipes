@@ -18,7 +18,7 @@
     user | default = "anon",
     password | default = "voidlinux",
     display | default = "none",
-    guest_packages | default = ["ca-certificates", "docker", "dosfstools", "git", "jq", "make", "xz"],
+    guest_packages | default = ["ca-certificates", "docker", "git", "jq", "make", "xz"],
   },
   output | default = "%{workdir}/void-live-%{arch}-%{variant}.iso",
   pkg_list | not_exported = std.string.join " " packages,
