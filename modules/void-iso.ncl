@@ -48,6 +48,7 @@
       fi
 
       build_dir="./%%{workdir}/void-mklive"
+      export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*'
       if [ ! -d "$build_dir/.git" ]; then
         mkdir -p "$(dirname "$build_dir")"
         git clone "%%{source}" "$build_dir"
@@ -90,8 +91,6 @@
 
     workdir="%%{workdir}"
     mkdir -p "$workdir"
-    mkdir -p "$workdir/docker"
-    chmod 0777 "$workdir/docker"
     askpass=$(mktemp "${TMPDIR:-/tmp}/void-iso-askpass.XXXXXX")
     {
       printf '%s\n' '#!/bin/sh'
@@ -102,6 +101,7 @@
     export SSH_ASKPASS_REQUIRE=force
     echo "void-iso: guest target %%{isolate.user}@127.0.0.1"
     ssh_opts=(
+      -n
       -o StrictHostKeyChecking=no
       -o UserKnownHostsFile=/dev/null
       -o PreferredAuthentications=password
@@ -146,7 +146,7 @@
       -machine "$accel"
       -cpu "$cpu_model"
       -m "$vm_ram" -smp "$vm_cpus"
-      -virtfs "local,path=$PWD,mount_tag=recipes,security_model=none,multidevs=remap"
+      -virtfs "local,path=$PWD,mount_tag=recipes,security_model=mapped-xattr,multidevs=remap"
       -drive "file=$seed,media=cdrom,readonly=on"
       -netdev "user,id=net0,hostfwd=tcp::${ssh_port}-:22"
       -device virtio-net-pci,netdev=net0
@@ -187,7 +187,7 @@
 
     echo "void-iso: mounting repository (elapsed $(elapsed)s)..."
     ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" \
-      "sudo mkdir -p /mnt/recipes; if ! sudo mountpoint -q /mnt/recipes; then sudo mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600 recipes /mnt/recipes; fi; printf '%s\\n' recipes > /mnt/recipes/$workdir/.write-test; rm -f /mnt/recipes/$workdir/.write-test"
+      "sudo mkdir -p /mnt/recipes; if ! sudo mountpoint -q /mnt/recipes; then sudo mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600 recipes /mnt/recipes; fi; sudo touch /mnt/recipes/$workdir/.write-test && sudo rm -f /mnt/recipes/$workdir/.write-test"
 
     echo "void-iso: installing guest prerequisites (elapsed $(elapsed)s)..."
     ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" \
@@ -195,7 +195,7 @@
 
     echo "void-iso: starting docker in guest (elapsed $(elapsed)s)..."
     ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" \
-      "sudo mkdir -p /etc/docker && printf '%s\\n' '{\"data-root\": \"/mnt/recipes/$workdir/docker\", \"storage-driver\": \"vfs\"}' | sudo tee /etc/docker/daemon.json >/dev/null && sudo ln -sf /etc/sv/docker /var/service/docker && docker_wait_started=\$(date +%s) && while [ ! -S /var/run/docker.sock ]; do if [ \"\$(( \$(date +%s) - docker_wait_started ))\" -ge 60 ]; then echo >&2 'void-iso: docker socket did not appear'; exit 1; fi; sleep 1; done"
+      "sudo ln -sf /etc/sv/docker /var/service/docker && docker_wait_started=\$(date +%s) && while [ ! -S /var/run/docker.sock ]; do if [ \"\$(( \$(date +%s) - docker_wait_started ))\" -ge 60 ]; then echo >&2 'void-iso: docker socket did not appear'; sudo sv status docker >&2 2>&1 || true; exit 1; fi; sleep 1; done"
 
     echo "void-iso: fetching nickel image (elapsed $(elapsed)s)..."
     ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" \
