@@ -106,7 +106,7 @@
     ln -sf /usr/share/zoneinfo/%%{timezone} /mnt/etc/localtime
 
     if [ -f /mnt/etc/default/libc-locales ]; then
-      sed -e "s/\\#\\(en_US.UTF-8.*\\)/\\1/" -i /mnt/etc/default/libc-locales
+      sed -i.bak -E 's/^#(en_US.UTF-8.*)/\1/' /mnt/etc/default/libc-locales
     fi
 
     mkdir -p /mnt/boot/efi/EFI/ZBM

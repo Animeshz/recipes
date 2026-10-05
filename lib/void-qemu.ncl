@@ -137,13 +137,24 @@
       if ! sudo mountpoint -q %%{cfg.guest_mount}; then
         sudo mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600 %%{cfg.share_tag} %%{cfg.guest_mount}
       fi
-      sudo xbps-install -Syu xbps
-      sudo xbps-install -Sy %%{if cfg.uefi then "edk2-ovmf " else ""}%%{cfg.packages}
+      if [ -z "$(sudo blkid /dev/vda 2>/dev/null)" ]; then
+        sudo mkfs.ext4 -F /dev/vda
+      fi
+      sudo mkdir -p /build
+      if ! sudo mountpoint -q /build; then
+        sudo mount /dev/vda /build
+      fi
+      sudo touch /build/.write-test && sudo rm -f /build/.write-test
+      sudo mkdir -p /etc/xbps.d
+      printf 'cachedir=%%{cfg.guest_mount}/.build/%%{cfg.id}/xbps-cachedir\n' | sudo tee /etc/xbps.d/10-cache.conf >/dev/null
+      export XBPS_CACHEDIR="%%{cfg.guest_mount}/.build/%%{cfg.id}/xbps-cachedir"
+      export XBPS_HOST_CACHEDIR="$XBPS_CACHEDIR"
+      sudo xbps-install -Syu xbps %%{if cfg.uefi then "edk2-ovmf " else ""}%%{cfg.packages}
       echo "%%{cfg.id}: guest prepared"
 __GUEST_PREP__
 
     echo "$id: running target (elapsed $(elapsed)s)..."
-    ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" "sudo %%{cfg.env} sh -s" <<'__GUEST_TARGET__'
+    ssh "${ssh_opts[@]}" -p "$ssh_port" "$guest_user@127.0.0.1" "sudo %%{cfg.env} bash -s" <<'__GUEST_TARGET__'
 set -e
 cd %%{cfg.guest_mount}
 %%{target}
