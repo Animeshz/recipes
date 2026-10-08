@@ -21,6 +21,7 @@ let base = import "../modules/void-iso.ncl" in
     share_tag = "recipes",
     guest_mount = "/mnt/recipes",
     disk_size = "20G",
+    keep_disk = false,
     packages = "ca-certificates git xz curl gzip",
     env = "",
   },

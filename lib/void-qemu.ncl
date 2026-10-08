@@ -15,11 +15,12 @@
         share_tag : String,
         guest_mount : String,
         disk_size : String,
+        keep_disk : Bool,
         packages : String,
         env : String,
       } -> String
     = fun target => fun cfg => m%%"
-    set -euo pipefail
+    set -eo pipefail
 
     id=%%{cfg.id}
     ssh_port=%%{cfg.ssh_port}
@@ -51,6 +52,40 @@
         fi
         ;;
     esac
+
+%%{if cfg.uefi then m%"
+    ovmf_code=""
+    for candidate in \
+      /opt/homebrew/share/qemu/edk2-x86_64-code.fd \
+      /usr/share/edk2/x64/OVMF_CODE.fd \
+      /usr/share/OVMF/OVMF_CODE.fd \
+      /usr/share/edk2-ovmf/x64/OVMF_CODE.fd \
+      /usr/share/qemu/OVMF_CODE.fd \
+      /usr/share/qemu/OVMF.fd; do
+      if [ -f "$candidate" ]; then
+        ovmf_code="$candidate"
+        break
+      fi
+    done
+    ovmf_vars="$workdir/OVMF_VARS.fd"
+    # Void's edk2-ovmf package ships a vars template alongside the code firmware.
+    # If we found the code firmware in a path that has a sibling vars file, use it.
+    case "$ovmf_code" in
+      /opt/homebrew/share/qemu/*) ;; # homebrew's qemu formula ships only CODE; we generate VARS from zero below
+      *) vars_sibling="${ovmf_code%/*}/OVMF_VARS.fd"
+         if [ -f "$vars_sibling" ]; then
+           cp "$vars_sibling" "$ovmf_vars"
+         else
+           dd if=/dev/zero of="$ovmf_vars" bs=64k count=1 2>/dev/null
+         fi
+         ;;
+    esac
+    [ -f "$ovmf_vars" ] || dd if=/dev/zero of="$ovmf_vars" bs=64k count=1 2>/dev/null
+    if [ -z "$ovmf_code" ]; then
+      echo >&2 "$id: no OVMF code firmware found"
+      exit 1
+    fi
+"% else ""}
 
     disk="$workdir/disk.qcow2"
     if [ ! -f "$disk" ]; then
@@ -89,11 +124,11 @@
       -m "%%{cfg.ram}" -smp "%%{cfg.cpus}"
       -virtfs "local,path=%%{cfg.share_path},mount_tag=%%{cfg.share_tag},security_model=mapped-xattr,multidevs=remap"
 %%{if cfg.uefi then m%"
-      -drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/x64/OVMF_CODE.fd
-      -drive if=pflash,format=raw,file=/usr/share/edk2/x64/OVMF_VARS.fd
+      -drive if=pflash,format=raw,readonly=on,file=$ovmf_code
+      -drive if=pflash,format=raw,file=$ovmf_vars
 "% else ""}
       -drive "file=$seed,media=cdrom,readonly=on"
-      -drive "file=$disk,if=virtio,format=qcow2"
+      -drive "file=$disk,if=virtio,format=qcow2,discard=unmap"
       -netdev "user,id=net0,hostfwd=tcp::${ssh_port}-:22"
       -device virtio-net-pci,netdev=net0
       -serial "unix:$workdir/qemu-serial.sock,server=on,wait=off"
@@ -109,7 +144,10 @@
         kill "$qemu_pid" 2>/dev/null || true
         wait "$qemu_pid" 2>/dev/null || true
       fi
-      rm -f "$workdir/qemu-serial.sock" "$askpass" "$disk"
+      rm -f "$workdir/qemu-serial.sock" "$askpass"
+      if [ "%%{if cfg.keep_disk then "true" else "false"}" != "true" ]; then
+        rm -f "$disk"
+      fi
     }
     trap cleanup EXIT INT TERM
 
@@ -137,13 +175,8 @@
       if ! sudo mountpoint -q %%{cfg.guest_mount}; then
         sudo mount -t 9p -o trans=virtio,version=9p2000.L,msize=104857600 %%{cfg.share_tag} %%{cfg.guest_mount}
       fi
-      if [ -z "$(sudo blkid /dev/vda 2>/dev/null)" ]; then
-        sudo mkfs.ext4 -F /dev/vda
-      fi
       sudo mkdir -p /build
-      if ! sudo mountpoint -q /build; then
-        sudo mount /dev/vda /build
-      fi
+      sudo mount -t tmpfs tmpfs /build
       sudo touch /build/.write-test && sudo rm -f /build/.write-test
       sudo mkdir -p /etc/xbps.d
       printf 'cachedir=%%{cfg.guest_mount}/.build/%%{cfg.id}/xbps-cachedir\n' | sudo tee /etc/xbps.d/10-cache.conf >/dev/null
